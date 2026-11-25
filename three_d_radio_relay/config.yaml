@@ -1,0 +1,20 @@
+name: Three D Radio relay
+version: "1.0.0"
+slug: three_d_radio_relay
+description: Stream Three D Radio with song and cover art from Home Assistant.
+arch: [aarch64, amd64]
+startup: application
+boot: auto
+homeassistant_api: true
+ports:
+  8753/tcp: 8753
+ports_description:
+  8753/tcp: Three D Radio audio and cover art
+options:
+  recognition_sensor: sensor.radio_stream_match
+  cover_entity: image.radio_stream_cover
+  public_url: http://relay.example.invalid:8753
+schema:
+  recognition_sensor: str
+  cover_entity: str
+  public_url: url

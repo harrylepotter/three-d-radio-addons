@@ -1,0 +1,90 @@
+timer:
+  three_d_drive:
+    name: Three D drive
+    duration: "02:00:00"
+    restore: true
+
+rest_command:
+  three_d_drive_request:
+    url: !secret three_d_drive_bridge_url
+    method: POST
+    headers:
+      Authorization: !secret three_d_drive_authorization
+    content_type: application/json
+    payload: "{{ {'operation': operation, 'track_id': track_id | default(''), 'push_token': push_token | default('')} | to_json }}"
+    timeout: 20
+
+script:
+  three_d_drive_start:
+    alias: Start Three D in the car
+    icon: mdi:radio
+    sequence:
+      - if: "{{ not is_state('timer.three_d_drive', 'active') }}"
+        then:
+          - action: timer.start
+            target: {entity_id: timer.three_d_drive}
+  three_d_drive_end:
+    alias: End Three D drive
+    icon: mdi:stop-circle-outline
+    sequence:
+      - action: timer.cancel
+        target: {entity_id: timer.three_d_drive}
+  three_d_drive_like:
+    alias: Like this song on Three D
+    icon: mdi:heart
+    mode: queued
+    sequence:
+      - action: rest_command.three_d_drive_request
+        data:
+          operation: "{{ 'like' if track_id | default('') else 'like_current' }}"
+          track_id: "{{ track_id | default('') }}"
+        response_variable: reply
+      - if: "{{ reply.status != 200 or not reply.content.accepted | default(false) }}"
+        then:
+          - stop: "No fresh Three D recording to save"
+            error: true
+      - variables:
+          result: "{{ reply.content }}"
+      - stop: Heart received
+        response_variable: result
+
+template:
+  - sensor:
+      - name: Three D drive display
+        unique_id: three_d_drive_display
+        state: >-
+          {% set s = 'sensor.radio_stream_match' %}
+          {% set age = as_timestamp(now()) - (state_attr(s, 'ts') | float(0)) %}
+          {% if not is_state('timer.three_d_drive', 'active') %}Off
+          {% elif has_value(s) and not is_state(s,'idle') and -5 <= age <= 150 and state_attr(s, 'title') and state_attr(s, 'artist') %}
+            {{ (state_attr(s, 'title') ~ ' — ' ~ state_attr(s, 'artist'))[:250] }}
+          {% else %}Listening for a match{% endif %}
+        attributes:
+          # Renew the widget's freshness while the same song is still being recognized.
+          match_window: >-
+            {% set s = 'sensor.radio_stream_match' %}
+            {% if is_state('timer.three_d_drive', 'active') and has_value(s) and not is_state(s, 'idle') %}
+              {{ (state_attr(s, 'ts') | int(0)) // 120 }}
+            {% endif %}
+          artwork: >-
+            {% if is_state('timer.three_d_drive', 'active') %}
+              {{ state_attr('sensor.radio_stream_match', 'art_url') | default('', true) }}
+            {% endif %}
+
+automation:
+  - id: three_d_drive_widget_update
+    alias: Three D drive widget update
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: sensor.three_d_drive_display
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.to_state is not none and trigger.to_state.state not in ['unknown','unavailable'] and
+             (is_state('timer.three_d_drive', 'active') or
+              (trigger.to_state.state == 'Off' and trigger.from_state is not none and
+               trigger.from_state.state not in ['Off','unknown','unavailable'])) }}
+    actions:
+      - action: rest_command.three_d_drive_request
+        data: {operation: widget_changed}

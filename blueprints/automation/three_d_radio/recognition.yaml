@@ -1,0 +1,60 @@
+blueprint:
+  name: Three D Radio recognition while listening
+  description: Enable stream recognition while a selected player is tuned to the station or the drive timer is active.
+  domain: automation
+  input:
+    players:
+      name: Radio players
+      selector:
+        entity:
+          filter: {domain: media_player}
+          multiple: true
+    recognition:
+      name: Stream recognition switch
+      selector:
+        entity:
+          filter: {domain: switch}
+    drive:
+      name: Drive timer
+      default: timer.three_d_drive
+      selector:
+        entity:
+          filter: {domain: timer}
+    station_ids:
+      name: Station media content IDs
+      description: Enter the stream URL, the relay stream URL, and any Music Assistant station URIs used by these players.
+      default: ["https://sounds.threedradio.com/stream"]
+      selector: {object: {}}
+mode: restart
+variables:
+  player_ids: !input players
+  drive_timer: !input drive
+  recognition_switch: !input recognition
+  station_ids: !input station_ids
+  listening: >-
+    {% set result = namespace(tuned=is_state(drive_timer, 'active')) %}
+    {% for player in expand(player_ids) | selectattr('state','eq','playing') %}
+      {% set uri = (player.attributes.media_content_id | default('', true)).split('?')[0] %}
+      {% set title = (player.attributes.media_title | default('', true)) | lower | replace(' ', '') %}
+      {% if uri in station_ids or uri | replace('builtin://radio/', '') in station_ids
+            or title in ['threedradio', '3dradio'] %}
+        {% set result.tuned = true %}
+      {% endif %}
+    {% endfor %}
+    {{ result.tuned }}
+triggers:
+  - trigger: state
+    entity_id: !input players
+  - trigger: state
+    entity_id: !input drive
+  - trigger: homeassistant
+    event: start
+  - trigger: time_pattern
+    minutes: "/1"
+conditions:
+  - condition: template
+    value_template: "{{ states(recognition_switch) in ['on', 'off'] and is_state(recognition_switch, 'on') != (listening | bool) }}"
+actions:
+  - action: "{{ 'switch.turn_on' if listening | bool else 'switch.turn_off' }}"
+    target:
+      entity_id: !input recognition

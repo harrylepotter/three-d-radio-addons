@@ -1,0 +1,28 @@
+automation:
+  - id: three_d_drive_live_activity
+    alias: Three D drive Live Activity
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: sensor.three_d_drive_display
+        to: null
+    actions:
+      - choose:
+          - conditions: "{{ trigger.to_state is not none and trigger.to_state.state not in ['Off','unknown','unavailable'] and is_state('timer.three_d_drive', 'active') }}"
+            sequence:
+              - action: !secret three_d_drive_notify_action
+                data:
+                  title: Three D Radio · 93.7 FM
+                  message: "{{ trigger.to_state.state }}"
+                  data:
+                    tag: three_d_drive
+                    live_update: true
+                    alert_once: true
+                    critical_text: "{{ trigger.to_state.state[:40] }}"
+                    notification_icon: mdi:radio
+          - conditions: "{{ trigger.to_state is not none and trigger.to_state.state == 'Off' and trigger.from_state is not none and trigger.from_state.state not in ['unknown','unavailable','Off'] }}"
+            sequence:
+              - action: !secret three_d_drive_notify_action
+                data:
+                  message: clear_notification
+                  data: {tag: three_d_drive}

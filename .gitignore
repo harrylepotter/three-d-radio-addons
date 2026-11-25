@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+secrets.yaml
+node_modules/
+/data/
+options.json
+drive-apns.json
+drive-widget.json
+.storage/

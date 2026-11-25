@@ -1,0 +1,28 @@
+name: Three D Radio playlist
+slug: three_d_radio_likes
+description: Save the song on Three D Radio when its station heart is pressed.
+version: "1.4.0"
+arch: [aarch64, amd64]
+startup: application
+boot: auto
+homeassistant_api: true
+options:
+  recognition_sensor: sensor.radio_stream_match
+  cover_entity: image.radio_stream_cover
+  music_url: http://music.example.invalid:8094
+  music_token: ""
+  playlist_uri: ""
+  apple_playlist_uri: ""
+  drive_bridge_key: ""
+  station_uris: []
+  players: []
+schema:
+  recognition_sensor: str
+  cover_entity: str
+  music_url: url
+  music_token: password
+  playlist_uri: str
+  apple_playlist_uri: str?
+  drive_bridge_key: password?
+  station_uris: [str]
+  players: [str]
