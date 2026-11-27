@@ -11,10 +11,13 @@ export function driveHandler({state, playlistTracks, enqueue, pending, historyFi
     writeFileSync(historyFile + ".tmp", JSON.stringify(history), {mode:0o600});
     renameSync(historyFile + ".tmp",historyFile);
   }
-  return async function handle({operation, track_id = "", push_token}) {
+  return async function handle({operation, track_id = "", push_token, timer_state, match_state}) {
     if (!operations.includes(operation)) throw new Error("Unknown drive action");
     if (operation === "register_widget") return {registered:widgetPush.register(push_token)};
-    const timer = await state("timer.three_d_drive");
+    // HA already has these states when it renders a widget request. A second
+    // round trip to HA can time out while the station recognizer is starting.
+    const widgetRead = operation === "status" || operation === "widget_changed";
+    const timer = (widgetRead && timer_state) || await state("timer.three_d_drive");
     const ends = Date.parse(timer.attributes.finishes_at || "");
     const time = Math.floor(now()/1000);
     if (timer.state !== "active" || !Number.isFinite(ends) || ends <= time*1000) {
@@ -22,7 +25,7 @@ export function driveHandler({state, playlistTracks, enqueue, pending, historyFi
       return {active:false, message:"Start Three D first"};
     }
     const session = timer.attributes.finishes_at;
-    const rec = await state(recognitionSensor);
+    const rec = (widgetRead && match_state) || await state(recognitionSensor);
     const a = rec.attributes;
     let current = null;
     const seen = Number(a.ts);
@@ -61,7 +64,12 @@ export function driveHandler({state, playlistTracks, enqueue, pending, historyFi
     let liked = false;
     if (displayed && time-displayed.seen <= 300) {
       const request = pending(displayed);
-      liked = request ? !request.remove : (await playlistTracks()).some(t=>sameRecording(displayed,t));
+      if (request) liked = !request.remove;
+      else {
+        // The recording is available even when MA cannot look up its heart.
+        const tracks = await playlistTracks(2000).catch(() => null);
+        liked = tracks ? tracks.some(t => sameRecording(displayed,t)) : null;
+      }
     }
     return {active:true,endsAt:ends/1000,track:current,lastTrack,liked,message:current ? "Three D Radio" : "Listening for a match"};
   };
@@ -77,7 +85,7 @@ export function serveDrive(secret, handle) {
       let body="";
       for await (const part of req) {
         body+=part;
-        if (body.length>2048) return reply(413,{error:"Too large"});
+        if (body.length>16384) return reply(413,{error:"Too large"});
       }
       let input;
       try { input=JSON.parse(body); } catch { return reply(400,{error:"Invalid request"}); }

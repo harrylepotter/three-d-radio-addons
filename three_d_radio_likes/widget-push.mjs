@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const encoded = object => Buffer.from(JSON.stringify(object)).toString("base64url");
 
-export function apnsSender(credentialsPath) {
+export function apnsSender(credentialsPath, openConnection = connect) {
   let session, authorization, topic, signedAt = 0;
   return async function send(token) {
     if (!existsSync(credentialsPath)) return {status: 0, reason: "AwaitingKey"};
@@ -20,13 +20,17 @@ export function apnsSender(credentialsPath) {
       signedAt = now;
     }
     if (!session || session.closed || session.destroyed) {
-      const connection = connect("https://api.sandbox.push.apple.com");
+      const connection = openConnection("https://api.sandbox.push.apple.com");
+      // A drive can start hours after the previous one. Retire the idle
+      // connection so the first track does not wait on a stale network path.
+      connection.setTimeout(5 * 60 * 1000, () => connection.close());
       connection.on("error", () => connection.destroy());
       connection.on("goaway", () => connection.close());
       session = connection;
     }
+    const connection = session;
     return new Promise((resolve, reject) => {
-      const req = session.request({
+      const req = connection.request({
         ":method":"POST", ":path":"/3/device/" + token, authorization,
         "apns-topic":topic, "apns-push-type":"widgets", "apns-collapse-id":"three-d-now-playing",
         "apns-expiration":String(now + 150), [sensitiveHeaders]:[":path", "authorization"]
@@ -36,11 +40,20 @@ export function apnsSender(credentialsPath) {
       req.setEncoding("utf8");
       req.on("data", chunk => { body += chunk; });
       req.on("error", reject);
+      req.on("close", () => {
+        if (!req.readableEnded) reject(new Error("APNs closed the widget stream before its response"));
+      });
       req.on("end", () => {
+        if (!status) return reject(new Error("Missing APNs response status"));
         try { resolve({status, reason:body ? JSON.parse(body).reason : ""}); }
         catch (error) { reject(error); }
       });
       req.end(JSON.stringify({aps:{"content-changed":true}}));
+    }).catch(error => {
+      // Aborting a single HTTP/2 stream leaves the session reusable in Node.
+      // A transport failure must make the next attempt reconnect.
+      connection.destroy();
+      throw error;
     });
   };
 }
@@ -64,6 +77,7 @@ export function widgetNotifications(directory, send) {
     timer = undefined;
     busy = true;
     const token = saved.token, version = revision;
+    let retryOnFreshConnection = false;
     try {
       const {status, reason} = await send(token);
       if (status === 200) {
@@ -79,10 +93,13 @@ export function widgetNotifications(directory, send) {
       }
       persist();
     } catch (error) {
-      if (++failures === 1) console.warn("Car widget transport unavailable:", error.code || error.name);
+      failures++;
+      retryOnFreshConnection = failures === 1;
+      if (retryOnFreshConnection) console.warn("Car widget transport unavailable:", error.code || error.name);
     } finally {
       busy = false;
-      schedule(failures ? Math.min(300, 10 * 2 ** Math.min(5, failures - 1)) * 1000 : 0);
+      const backoff = failures ? Math.min(300, 10 * 2 ** Math.min(5, failures - 1)) * 1000 : 0;
+      schedule(retryOnFreshConnection ? 1000 : backoff);
     }
   }
   schedule();

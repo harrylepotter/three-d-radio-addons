@@ -23,6 +23,8 @@ Create or select an editable Apple Music playlist in Music Assistant and add it 
 
 ## CarPlay
 
+For a live song title and a one-tap heart, assign `button.three_d_car_song`, `script.three_d_drive_start`, and `script.three_d_drive_end` to a Home Assistant area named **Three D Radio** after installing the package. Open **Home Assistant → Areas → Three D Radio** in CarPlay, start the drive, and tap a recognized song to save it to the radio playlist. If Areas is hidden, enable it in Home Assistant’s CarPlay **Settings → Tabs**.
+
 1. Copy `packages/three_d_drive.yaml` to your Home Assistant packages directory and enable packages in your configuration. In that **local copy**, replace the example sensor `sensor.radio_stream_match` with your scrobSter sensor, or assign your sensor that entity ID. The sensor provides `artist`, `title`, `ts` (Unix seconds), and optionally `isrc` and `art_url`.
 2. Set a random `drive_bridge_key` in the playlist add-on. In your own HA secrets, set `three_d_drive_authorization` to `Bearer ` followed by that key. Set `three_d_drive_bridge_url` to the add-on’s internal HTTP origin on port 8754 with path `/drive`. Find its hostname on the add-on Info tab. Restart the add-on and load the package.
 3. For server-triggered widget updates, enable Push Notifications for the iOS targets and create a sandbox APNs signing key restricted to the app’s topic. In the playlist add-on’s persistent `/data/drive-apns.json` file, set the string fields `teamId`, `bundleId` (the **app** identifier), `keyId` and `privateKey` (PEM). Restrict file access to the add-on owner. The provider reads the key locally and sends a content-change signal to Apple. The widget fetches artwork and track details directly from your server.

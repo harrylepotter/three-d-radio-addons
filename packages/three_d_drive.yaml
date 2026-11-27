@@ -11,7 +11,18 @@ rest_command:
     headers:
       Authorization: !secret three_d_drive_authorization
     content_type: application/json
-    payload: "{{ {'operation': operation, 'track_id': track_id | default(''), 'push_token': push_token | default('')} | to_json }}"
+    payload: >-
+      {% set request = dict(operation=operation, track_id=track_id | default(''), push_token=push_token | default('')) %}
+      {% if operation in ['status', 'widget_changed'] %}
+        {% set t = 'timer.three_d_drive' %}
+        {% set s = 'sensor.radio_stream_match' %}
+        {% set timer = dict(state=states(t), attributes=dict(finishes_at=state_attr(t, 'finishes_at'))) %}
+        {% set match = dict(state=states(s), attributes=dict(ts=state_attr(s, 'ts'), artist=state_attr(s, 'artist'),
+           title=state_attr(s, 'title'), isrc=state_attr(s, 'isrc'), art_url=state_attr(s, 'art_url'))) %}
+        {{ dict(request, timer_state=timer, match_state=match) | to_json }}
+      {% else %}
+        {{ request | to_json }}
+      {% endif %}
     timeout: 20
 
 script:
@@ -21,8 +32,20 @@ script:
     sequence:
       - if: "{{ not is_state('timer.three_d_drive', 'active') }}"
         then:
+          - variables:
+              started: "{{ as_timestamp(now()) | int }}"
           - action: timer.start
             target: {entity_id: timer.three_d_drive}
+          # The widget gets a guaranteed reload when the Start button finishes.
+          # Give the recognizer its first sample before using that reload.
+          - wait_template: >-
+              {% set s = 'sensor.radio_stream_match' %}
+              {{ not is_state('timer.three_d_drive', 'active') or
+                 (has_value(s) and not is_state(s, 'idle') and
+                  (state_attr(s, 'ts') | float(0)) >= (started | int) and
+                  (state_attr(s, 'title') or '') != '' and (state_attr(s, 'artist') or '') != '') }}
+            timeout: "00:00:17"
+            continue_on_timeout: true
   three_d_drive_end:
     alias: End Three D drive
     icon: mdi:stop-circle-outline
@@ -70,6 +93,37 @@ template:
             {% if is_state('timer.three_d_drive', 'active') %}
               {{ state_attr('sensor.radio_stream_match', 'art_url') | default('', true) }}
             {% endif %}
+  - button:
+      - unique_id: three_d_car_song
+        default_entity_id: button.three_d_car_song
+        name: >-
+          {% set song = states('sensor.three_d_drive_display') %}
+          {{ 'Drive is off' if song == 'Off' else 'Waiting for Three D' if song in ['unknown', 'unavailable'] else song }}
+        icon: >-
+          {% set song = states('sensor.three_d_drive_display') %}
+          {{ 'mdi:radio-off' if song == 'Off' else 'mdi:radio-tower' if song in
+             ['unknown', 'unavailable', 'Listening for a match'] else 'mdi:heart-outline' }}
+        press:
+          - variables:
+              displayed: "{{ state_attr('button.three_d_car_song', 'friendly_name') }}"
+          - if: "{{ not is_state('timer.three_d_drive', 'active') or state_attr('button.three_d_car_song', 'icon') != 'mdi:heart-outline' }}"
+            then:
+              - stop: "There is no current song to save."
+                error: true
+          - action: rest_command.three_d_drive_request
+            data: {operation: status}
+            response_variable: reply
+          - variables:
+              track: "{{ reply.content.track | default(none) if reply.status == 200 else none }}"
+          - if: >-
+              {{ track is not mapping or not track.get('id') or
+                 displayed != (track.title ~ ' — ' ~ track.artist)[:250] }}
+            then:
+              - stop: "The song changed or recognition expired. Tap the current title."
+                error: true
+          - action: script.three_d_drive_like
+            data:
+              track_id: "{{ track.id }}"
 
 automation:
   - id: three_d_drive_widget_update

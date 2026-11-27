@@ -17,10 +17,10 @@ function persist() {
   writeFileSync(pendingFile + ".tmp", JSON.stringify(pending), {mode: 0o600});
   renameSync(pendingFile + ".tmp", pendingFile);
 }
-async function music(command, args) {
+async function music(command, args, timeout = 30000) {
   const r = await fetch(new URL("/api", options.music_url), {
     method: "POST", headers: {Authorization: "Bearer " + options.music_token, "Content-Type": "application/json"},
-    body: JSON.stringify({message_id:"radio-likes",command,args}), redirect:"error", signal:AbortSignal.timeout(30000)
+    body: JSON.stringify({message_id:"radio-likes",command,args}), redirect:"error", signal:AbortSignal.timeout(timeout)
   });
   if (!r.ok) throw new Error(command + " returned HTTP " + r.status);
   return r.json();
@@ -32,9 +32,9 @@ async function state(entity) {
   if (!r.ok) throw new Error(entity + " returned HTTP " + r.status);
   return r.json();
 }
-const playlistTracks = () => music("music/playlists/playlist_tracks", {
+const playlistTracks = (timeout) => music("music/playlists/playlist_tracks", {
   item_id:playlist, provider_instance_id_or_domain:"library", force_refresh:true
-});
+}, timeout);
 const apple = options.apple_playlist_uri && appleSync({sourceId:playlist, destinationUri:options.apple_playlist_uri,
   dataDir:"/data", music, sourceTracks:playlistTracks});
 function queueAppleTrack(track) {

@@ -5,6 +5,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { driveHandler } from "../three_d_radio_likes/drive.mjs";
 
+test("a widget can receive the first match while the HA callback and playlist are unavailable", async t => {
+  const directory = mkdtempSync(join(tmpdir(),"three-d-start-"));
+  t.after(() => rmSync(directory,{recursive:true,force:true}));
+  const time = 1800000000;
+  let changes = 0;
+  const handle = driveHandler({
+    historyFile:join(directory,"history"), now:() => time * 1000,
+    state:async () => { throw new Error("HA callback timed out"); },
+    playlistTracks:async () => { throw new Error("MA is busy"); },
+    pending:() => null, widgetPush:{changed:() => changes++}
+  });
+  const timer_state = {state:"active",attributes:{finishes_at:new Date((time+7200)*1000).toISOString()}};
+  const match_state = {state:"matched",attributes:{ts:time,artist:"Artist",title:"First song"}};
+  await handle({operation:"widget_changed",timer_state,match_state});
+  assert.equal(changes,1);
+  const current = await handle({operation:"status",timer_state,match_state});
+  assert.equal(current.track.title,"First song");
+  assert.equal(current.liked,null);
+  const ended = await handle({operation:"status",timer_state:{state:"idle",attributes:{}}});
+  assert.equal(ended.active,false);
+  await assert.rejects(handle({operation:"like_current",timer_state,match_state}), /HA callback/);
+});
+
 test("car heart saves its displayed track across a change and rejects expired sessions", async t => {
   const directory = mkdtempSync(join(tmpdir(),"three-d-heart-"));
   t.after(() => rmSync(directory,{recursive:true,force:true}));
